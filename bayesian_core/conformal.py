@@ -30,7 +30,7 @@ def weighted_nonconformity(
     base = nonconformity_scores(observed_outcomes, predicted_theta)
     if weights is None:
         return base
-w = np.asarray(weights, dtype=float)
+    w = np.asarray(weights, dtype=float)
     w = w / (w.mean() + 1e-12)
     return base * w
 
@@ -55,13 +55,10 @@ def jackknife_plus_quantile(
     """
     Approximate Jackknife+ radius: quantile of leave-one-out style residuals.
     Here residuals are precomputed; true J+ would refit each fold.
-    Still useful as a slightly more conservative width than plain split when
-    residuals are exchangeable.
     """
     n = len(residuals)
     if n < 2:
         return split_conformal_interval(residuals, alpha)
-    # Use (1-alpha)(1+1/n) quantile inflation
     level = min(1.0, (1 - alpha) * (1.0 + 1.0 / n))
     return float(np.quantile(np.abs(residuals), level))
 
