@@ -1,18 +1,39 @@
 # CodeSorcerer default configuration
 
-alpha_total: 0.05
-min_eval_instances: 8
-conformal_alpha: 0.10
-max_conformal_width: 0.25
+# Family-wise e-process budget (stricter than exploratory 0.10)
+alpha_total: 0.03
+min_eval_instances: 12
+
+# Conformal gate
+conformal_alpha: 0.05
+max_conformal_width: 0.18
+conformal_method: split  # split | jackknife_plus_approx
 
 state_dir: state
 belief_store_path: state/belief_store.json
 harness_path: state/harness.json
 audit_log_path: state/audit_log.json
 
-# Canary settings
-canary_extra_instances: 15
+# Canary settings (stricter production defaults)
+canary_extra_sessions: 20
+canary_min_sessions: 8
+canary_success_threshold: 0.72
 canary_dir: state/canaries
+
+# Soft-commit wealth floor before reject
+eprocess_wealth_floor: 0.12
+eprocess_min_n: 10
+
+# Swarm → auto skill patch
+auto_skill_patch_enabled: true
+auto_skill_patch_min_agents: 3
+
+# LLM
+# CODESORCERER_LLM_PROVIDER: echo | openai | anthropic | local
+
+# Dashboard
+dashboard_host: 127.0.0.1
+dashboard_port: 8765
 
 # Logging
 log_level: INFO
