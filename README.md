@@ -12,6 +12,8 @@ Production-oriented Bayesian framework for self-improving autonomous agents.
 - **Hierarchical Bayesian tracking** of `self.memory_bank`, `self.metrics`, `self.learning_rate`, `self.policy`, and confidence/values (NumPyro)
 - **Anytime-valid commit gates** using GRO mixture e-processes + harmonic family-wise spending
 - **Soft vs Hard commit** with canary deployments and conformal prediction gates
+- **Persistent BeliefStore + versioned Harness**
+- **Orchestrator** coordinating the full improvement cycle
 - **Ontology ↔ Bayesian sync** stubs
 - **Multi-agent federated posterior** sharing + certificate aggregation
 - **Concrete audit-log schema** with replay helpers
@@ -27,6 +29,10 @@ Production-oriented Bayesian framework for self-improving autonomous agents.
 ### Directory Structure
 
 ```
+core/
+  belief_store.py           # Persistent posterior sufficient statistics
+  harness.py                # Versioned skills / policy / memory container
+  orchestrator.py           # Main improvement cycle controller
 bayesian_core/
   hierarchical_model.py     # Joint NumPyro hierarchical model
   interventional.py         # Interventional likelihood mask
@@ -43,9 +49,13 @@ federation/
 architecture/
   reference_architecture.md
   combined_protocol.md
+config/
+  default.yaml
 examples/
-  basic_loop.py             # Minimal end-to-end improvement cycle
+  basic_loop.py
+  full_cycle.py             # Full Orchestrator-based example
 requirements.txt
+.gitignore
 ```
 
 ### Quick Start
@@ -53,8 +63,11 @@ requirements.txt
 ```bash
 pip install -r requirements.txt
 python -m examples.basic_loop
+python -m examples.full_cycle
 ```
+
+State (belief store, harness, audit log, canaries) is written under `./state/`.
 
 ### Status
 
-Core statistical and architectural pieces are in place. Ready for extension into a full persistent agent runtime.
+Core statistical, architectural, and persistence pieces are in place. The system is ready for real task evaluators and deeper runtime integration.
