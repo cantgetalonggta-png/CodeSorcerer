@@ -25,116 +25,114 @@ L1  Steering / retrieval         (future adapter hooks)
 L0  Frozen Base LLM              (EchoLLM / OpenAI / Anthropic / local)
 ```
 
-Cross-cutting:
-- **BeliefStore** — sufficient statistics for all `self.*` posteriors
-- **SessionMemory** — trajectory tagging (`agent_intervention` vs `external_observation`)
-- **SkillRegistry** — loadable Markdown + Python skills
-- **Evaluator** — scores candidates on instances
-- **AuditLog** — certificates and replay
+Cross-cutting: **BeliefStore**, **SessionMemory**, **SkillRegistry**, **Evaluator**, **AuditLog**.
+
+See also: `architecture/reference_architecture.md`, `architecture/combined_protocol.md`, `architecture/drive_inventory.md`.
 
 ---
 
-## Module Map (what each service does)
+## Module Map
 
 ### `core/` — Runtime spine
 
 | Module | Role |
 |--------|------|
-| `belief_store.py` | Persistent Beta-style counts + hyper-parameters for skills, memory, LR, policy, confidence. Source of truth for posteriors. |
-| `harness.py` | Versioned container for skills, policy fragments, memory refs, ontology snapshot. Only mutated under a valid certificate. |
-| `orchestrator.py` | Full improvement cycle: evaluate candidate → e-process + conformal gate → soft canary (real extra sessions) or hard commit (real patch merge) → persist. |
-| `session_memory.py` | Creates sessions, tags every event as agent vs external, persists trajectories. |
-| `canary.py` | Deploys a canary harness and **actually runs** extra evaluation sessions; returns success rate. |
-| `commit.py` | **Hard-commit path**: merges candidate skills/policy/memory into the live harness and bumps versions under a certificate. |
-| `evidence.py` | Walks a session trajectory and extracts only *external* evidence records safe for Bayesian updates. |
-| `evaluator.py` | `Evaluator` interface + `KeywordMatchEvaluator` + `ThresholdSuccessEvaluator` + helper to build canary `session_fn`. |
+| `belief_store.py` | Posterior sufficient statistics for skills, memory, LR, policy, confidence |
+| `harness.py` | Versioned skills / policy / memory container |
+| `orchestrator.py` | Evaluate → gate → canary or hard-commit → persist |
+| `session_memory.py` | Trajectory tagging (agent vs external) |
+| `canary.py` | Real extra-session canary runner |
+| `commit.py` | Merge candidate patches under certificate |
+| `evidence.py` | Trajectory → external-only evidence records |
+| `evaluator.py` | Scoring interface + keyword/threshold evaluators |
 
-### `bayesian_core/` — Statistical engine
+### `bayesian_core/`
 
-| Module | Role |
-|--------|------|
-| `hierarchical_model.py` | Joint NumPyro hierarchical model over skills, memory, learning-rate, policy strength, confidence. SVI-friendly. |
-| `interventional.py` | Interventional loss mask (PyTorch) + interventional Bayesian count update (no gradient/count from agent tokens). |
-| `eprocess.py` | GRO mixture e-variable + `HarmonicSpender` + `production_commit_gate`. Anytime-valid Type-I control. |
-| `conformal.py` | Nonconformity scores, split-conformal intervals, conformal p-values for soft-commit conservatism. |
+Hierarchical NumPyro model, interventional mask, GRO e-process + harmonic spender, conformal helpers.
 
-### `commit_gate/`
+### `commit_gate/` · `audit/` · `ontology/` · `federation/` · `llm/`
 
-| Module | Role |
-|--------|------|
-| `soft_hard.py` | Combines e-process decision with conformal p-value/width into `hard_commit` / `soft_canary` / `reject` / `continue`. |
+Soft/hard decisions, certificates, ontology↔posterior stubs, multi-agent belief packets, BaseLLM + OpenAI/Anthropic/local adapters.
 
 ### `skills/` + `skills_data/`
 
-| Piece | Role |
-|--------|------|
-| `skills/registry.py` | Loads **Markdown** skills (YAML-like front-matter) and **Python** skills (`run` / `execute` entrypoints). |
-| `skills_data/summarize.md` | Concise summary skill; prefers external evidence. |
-| `skills_data/verify_claim.md` | Claim verification skill; separates agent statements from external observations. |
-| `skills_data/echo_tool.py` | Sample Python skill — echoes input and flags external-looking content. |
-| `skills_data/score_keywords.py` | Python skill that returns keyword-coverage ratio (used by evaluators). |
-
-### `llm/`
-
-| Module | Role |
-|--------|------|
-| `base.py` | `BaseLLM` ABC, `EchoLLM` (local testing), `ToolSpec`, `Message`, `LLMResponse`, `ToolRouter`. |
-| `adapters.py` | Thin **OpenAI**, **Anthropic**, and **local OpenAI-compatible** (Ollama/vLLM/llama.cpp) adapters. |
-
-### `audit/`
-
-| Module | Role |
-|--------|------|
-| `schema.py` | `CertificateRecord` + `AuditLog` with JSON persistence and replay summary. |
-
-### `ontology/` + `federation/`
-
-| Module | Role |
-|--------|------|
-| `ontology/sync.py` | Bidirectional stubs: ontology nodes ↔ posterior keys; push posteriors back into ontology metadata. |
-| `federation/posterior_share.py` | Multi-agent belief packets + Beta-count merge + certificate aggregation. |
-
-### `architecture/`
-
-| Doc | Content |
-|-----|---------| 
-| `reference_architecture.md` | Layer diagram and safety invariants. |
-| `combined_protocol.md` | Full cycle protocol and guarantee table. |
-
-### `config/`
-
-| File | Role |
-|------|------|
-| `default.yaml` | Default alpha, conformal settings, paths, canary session count. |
-
-### `examples/`
-
-| Script | What it demonstrates |
-|--------|----------------------|
-| `basic_loop.py` | Minimal e-process + soft-commit decision + audit. |
-| `full_cycle.py` | BeliefStore + Harness + Orchestrator smoke run. |
-| `orchestrated_canary.py` | **Tight end-to-end**: SkillRegistry + KeywordMatchEvaluator + Orchestrator with real canary sessions and hard-commit merge. |
-
-### `tests/` + CI
-
-| Piece | Role |
-|--------|------|
-| `tests/test_core.py` | Validates belief updates, harness versioning, e-process growth, session tagging, hard-commit merge, skill loading. |
-| `.github/workflows/ci.yml` | GitHub Actions: install deps, run validation script, smoke example, on push/PR to `main`. |
+Recursive loader for Markdown (front-matter) and Python (`run`/`execute`) skills. Full pack list in `skills_data/PACKS.md`.
 
 ---
 
-## End-to-end flow (one improvement cycle)
+## Skill packs (larger library)
 
-1. **Session** — `SessionMemory` records events tagged `agent_intervention` or `external_observation`.
-2. **Evidence extraction** — `extract_evidence_from_session` keeps only external records.
-3. **Interventional update** — `apply_evidence_to_belief` / `BeliefStore.update_skill` (agent actions never increment counts).
-4. **Candidate generation** — propose skill/policy patches (from failures, low posterior reliability, etc.).
-5. **Evaluation** — `Evaluator.score` on paired instances; outcomes feed the GRO mixture e-process.
-6. **Gate** — e-process + conformal → `hard_commit` | `soft_canary` | `reject` | `continue`.
-7. **Soft canary** — `CanaryRunner` deploys a canary harness and runs extra sessions; may auto-promote.
-8. **Hard commit** — `apply_candidate_patch` merges skills/policy into the live `Harness` and bumps versions under the certificate.
-9. **Audit + persist** — certificate logged; BeliefStore, Harness, AuditLog written under `state/`.
+### Root skills
+
+| ID | Type | Purpose |
+|----|------|--------|
+| summarize | md | Summaries preferring external evidence |
+| verify_claim | md | Agent vs external separation |
+| echo_tool | py | Echo + external heuristic |
+| score_keywords | py | Keyword coverage ratio |
+
+### `packs/research/`
+
+| ID | Type | Purpose |
+|----|------|--------|
+| timeline_builder | md | Chronologies with source-class tags |
+| entity_resolution | md | Canonical entities + aliases |
+| source_grading | md | A/B/C/D/X source grades |
+| dork_builder | py | Build public search queries (no execution) |
+
+### `packs/evidence/`
+
+| ID | Type | Purpose |
+|----|------|--------|
+| extract_citations | md | Structured citations |
+| contradiction_scan | md | Conflict detection |
+
+### `packs/agent/`
+
+| ID | Type | Purpose |
+|----|------|--------|
+| memory_vault | md | Tagged durable memory hygiene |
+| pattern_link | md | Evidence-based entity linking |
+
+### `packs/documents/`
+
+| ID | Type | Purpose |
+|----|------|--------|
+| pdf_digest | md | Structured PDF text digests |
+
+### `packs/recovery/`
+
+| ID | Type | Purpose |
+|----|------|--------|
+| relapse_education | md | Non-clinical educational recovery framing |
+
+Load all packs:
+
+```python
+from skills.registry import SkillRegistry
+reg = SkillRegistry(skills_dir="skills_data")
+reg.load_directory()  # recursive **/*.md and **/*.py
+print(reg.list_skills())
+```
+
+---
+
+## Google Drive alignment
+
+Connected Drive was inventoried (`architecture/drive_inventory.md`):
+
+- **AGENT_ROLE / Skills** — upstream SKILL.txt templates, init_skill scaffold, skill-seeker docs → CodeSorcerer uses the same front-matter skill pattern.
+- **advanced-swarm / Project Structure** — MemoryVault, PatternRecognition-style roles → mapped to memory_vault + pattern_link + research packs.
+- **Braeden Drake certificates / Choices For Change** — recovery education domain → non-clinical `relapse_education` skill only.
+- **Epstein investigation** — public-records research theme → timeline, entity resolution, source grading, citations (no offensive tooling).
+
+CodeSorcerer does **not** import unbound/offensive directive scripts from Drive; safety remains interventional Bayesian gates + audit certificates.
+
+---
+
+## End-to-end flow
+
+Session (tagged) → external evidence only → interventional Bayesian update → candidate skills/policy → Evaluator + GRO e-process + conformal → soft canary (real sessions) or hard commit (patch merge) → audit + persist under `state/`.
 
 ---
 
@@ -144,52 +142,27 @@ Cross-cutting:
 git clone https://github.com/cantgetalonggta-png/CodeSorcerer.git
 cd CodeSorcerer
 pip install -r requirements.txt
-
-# Validation
 python tests/test_core.py
-
-# Examples
 python -m examples.basic_loop
 python -m examples.full_cycle
 python -m examples.orchestrated_canary
 ```
 
-State (belief store, harness, audit log, canaries, sessions) is written under `./state/`.
+Optional: `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` or local OpenAI-compatible server for LLM adapters.
 
-### Optional LLM backends
-
-```bash
-# OpenAI
-export OPENAI_API_KEY=...
-# Anthropic
-export ANTHROPIC_API_KEY=...
-# Local (Ollama example)
-# run ollama serve, then use LocalOpenAICompatibleAdapter(base_url="http://localhost:11434/v1", model="llama3.2")
-```
-
----
-
-## Skills currently shipped
-
-| Skill ID | Type | Purpose |
-|----------|------|---------|
-| `summarize` | Markdown | Concise summaries that privilege external evidence |
-| `verify_claim` | Markdown | Claim checking with agent vs external separation |
-| `echo_tool` | Python | Echo + external-evidence heuristic |
-| `score_keywords` | Python | Keyword coverage ratio for evaluators |
-
-Add more by dropping `.md` or `.py` files into `skills_data/` and calling `SkillRegistry.load_directory()`.
+CI: `.github/workflows/ci.yml` on push/PR to `main`.
 
 ---
 
 ## Status
 
-- Statistical core (interventional updates, GRO e-process, conformal, hierarchical NumPyro model) — **in place**
-- Persistence (BeliefStore, Harness, Session, Audit) — **in place**
-- Real canary runner + hardened hard-commit — **in place**
-- Skill registry + sample skills — **in place**
-- Evaluator + orchestrated example — **in place**
-- LLM adapters (Echo / OpenAI / Anthropic / local) — **in place**
-- CI on GitHub Actions — **in place**
-
-Ready for real task evaluators, production LLM wiring, and larger skill libraries.
+| Area | State |
+|------|--------|
+| Interventional Bayesian core + GRO/conformal gates | in place |
+| BeliefStore, Harness, Orchestrator, Canary, hard-commit | in place |
+| Session memory + evidence extraction | in place |
+| Skill registry + **multi-domain skill packs** | in place |
+| Evaluator + orchestrated example | in place |
+| LLM adapters | in place |
+| Drive inventory alignment doc | in place |
+| CI | in place |
