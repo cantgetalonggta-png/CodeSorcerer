@@ -38,7 +38,7 @@ class BaseLLM(ABC):
     """Abstract base for any concrete LLM backend."""
 
     @abstractmethod
-def complete(
+    def complete(
         self,
         messages: List[Message],
         tools: Optional[List[ToolSpec]] = None,
@@ -92,5 +92,4 @@ class ToolRouter:
         return self._tools[name](**arguments)
 
     def specs(self) -> List[ToolSpec]:
-        # Minimal specs; real systems would attach JSON schemas
         return [ToolSpec(name=n, description=f"Tool {n}") for n in self._tools]
