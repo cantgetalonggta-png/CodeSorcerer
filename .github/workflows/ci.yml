@@ -21,17 +21,23 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Install minimal dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-min.txt
           pip install pytest
 
-      - name: Run core validation script
+      - name: Core tests
         run: python tests/test_core.py
 
-      - name: Run pytest if available
-        run: pytest tests/ -q --tb=short || true
+      - name: Security and ontology tests
+        run: python tests/test_security_ontology.py
 
-      - name: Run basic example (smoke)
+      - name: Purple team suite
+        run: python -m security.purple_team
+
+      - name: Basic example smoke
         run: python -m examples.basic_loop
+
+      - name: Swarm demo smoke
+        run: python -m examples.swarm_demo
