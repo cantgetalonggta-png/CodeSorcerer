@@ -2,88 +2,64 @@
 
 **Custom Agent Framework & Persistent Workspace — Orchestrated by Grok**
 
-Bayesian autonomous agent with interventional updates, anytime-valid commit gates, swarm multi-agent layer, skill packs, PDF tools, and a local dashboard.
+Bayesian autonomous agent: interventional updates, anytime-valid gates, strict canary, swarm multi-agent layer, skill packs, PDF tools, ontology framework, local dashboard, and **scoped security tooling** (ROE / threat model / purple-team).
 
 ---
 
-## Core principles
+## Security (authorized & defensive only)
 
-1. Frozen base model + mutable harness  
-2. Only **external** observations update posteriors  
-3. GRO e-process + conformal + **strict canary** before hard commit  
-4. Full audit trail  
+| Asset | Path |
+|-------|------|
+| Red-team **ROE template** | `security/roe_template.md` |
+| **Threat model** | `security/threat_model.md` |
+| **Purple-team checks** | `security/purple_team.py` |
+| Public OSINT method skill | `skills_data/packs/research/public_osint_method.md` |
 
----
-
-## Bayesian + canary safety (stricter defaults)
-
-`config/default.yaml`:
-
-- `alpha_total: 0.03`
-- `conformal_alpha: 0.05`, `max_conformal_width: 0.18`
-- `canary_success_threshold: 0.72`, `canary_min_sessions: 8`, `canary_extra_sessions: 20`
-
-Inference stack L0–L4: `bayesian_core/inference_layers.py`  
-Methods: `architecture/conformal_methods.md`, `architecture/bayesian_canary_safety.md`
-
-Conformal API: split, jackknife+ approx, weighted residuals, `gate_metrics()`.
-
----
-
-## Swarm → Orchestrator auto skill patches
-
-```python
-from swarm import SwarmRunner, swarm_to_candidate_patch
-from core import Orchestrator, BeliefStore, Harness
-
-swarm = SwarmRunner(llm=create_llm())
-result = swarm.run_sequential(task, context=pdf_text)
-# Orchestrator.evaluate_swarm_patch(result, instances, evaluate_fn, session_fn_for_canary=...)
-```
-
-`swarm/auto_patch.py` builds `candidate_patch` from agent outputs; Orchestrator runs e-process → canary → hard-commit merge.
-
----
-
-## PDF tools
-
-```python
-from tools.pdf_tools import extract_pdf_text, extract_many
-r = extract_pdf_text("doc.pdf")
-ctx = extract_many(["a.pdf", "b.pdf"])  # swarm context
-```
-
-Requires `pypdf` (in requirements.txt).
-
----
-
-## Dashboard UI
+These do **not** assert unrestricted internet access. ROE requires written authorization and explicit scope.
 
 ```bash
-python -m examples.full_cycle   # populate state/
-python -m dashboard.app         # http://127.0.0.1:8765/
+python -m security.purple_team
+python tests/test_security_ontology.py
 ```
 
-Stdlib HTTP server: HTML status + `/api/belief`, `/api/harness`, `/api/audit`.  
-Details: `architecture/dashboard_ui.md`
+---
+
+## Ontology & autonomy
+
+- `ontology/sync.py` — nodes ↔ posterior keys
+- `ontology/framework.py` — bootstrap, validate, health, relations
+- Bayesian L0–L4 stack + Orchestrator canary/hard-commit remain the authority for live `self.*` changes
 
 ---
 
-## Production LLM
+## Test status (verified locally)
 
-`llm.factory.create_llm()` — env `CODESORCERER_LLM_PROVIDER=echo|openai|anthropic|local`  
-Guide: `architecture/production_llm_wiring.md`
-
----
-
-## Quick start
+- `tests/test_core.py` — PASS
+- `tests/test_security_ontology.py` — PASS
+- `security.purple_team` — PASS 4/4
+- Examples: `basic_loop`, `swarm_demo` smoke OK
+- Fixed: optional jax/torch imports; `BaseLLM.complete` indentation
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-min.txt   # CI / light
+# or: pip install -r requirements.txt  # full numpyro/torch
 python tests/test_core.py
-python -m examples.swarm_demo
-python -m examples.orchestrated_canary
+python tests/test_security_ontology.py
 python -m dashboard.app
 ```
+
+---
+
+## Quick map
+
+| Area | Location |
+|------|----------|
+| Orchestrator / canary / commit | `core/` |
+| GRO / conformal / inference layers | `bayesian_core/` |
+| Swarm + auto skill patches | `swarm/` |
+| Skills | `skills_data/` (+ packs) |
+| PDF tools | `tools/pdf_tools.py` |
+| Dashboard | `python -m dashboard.app` |
+| LLM factory | `llm.factory.create_llm` |
 
 Repo: https://github.com/cantgetalonggta-png/CodeSorcerer
