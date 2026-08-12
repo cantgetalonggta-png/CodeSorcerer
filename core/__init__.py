@@ -5,6 +5,7 @@ from .session_memory import Session, SessionMemory, TrajectoryEvent
 from .canary import CanaryRunner, CanaryResult
 from .commit import apply_candidate_patch
 from .evidence import EvidenceRecord, extract_evidence_from_session, apply_evidence_to_belief
+from .evaluator import Evaluator, KeywordMatchEvaluator, ThresholdSuccessEvaluator, make_canary_session_fn
 
 __all__ = [
     "BeliefStore",
@@ -19,4 +20,8 @@ __all__ = [
     "EvidenceRecord",
     "extract_evidence_from_session",
     "apply_evidence_to_belief",
+    "Evaluator",
+    "KeywordMatchEvaluator",
+    "ThresholdSuccessEvaluator",
+    "make_canary_session_fn",
 ]
