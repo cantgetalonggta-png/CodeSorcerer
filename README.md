@@ -2,119 +2,88 @@
 
 **Custom Agent Framework & Persistent Workspace — Orchestrated by Grok**
 
-A production-oriented **Bayesian autonomous agent** system. The agent improves its own skills, memory, policy, and learning dynamics under **causal** (interventional) updates and **anytime-valid statistical certificates**. Every live change to the agent’s state is gated; self-delusion is structurally prevented.
+Bayesian autonomous agent with interventional updates, anytime-valid commit gates, swarm multi-agent layer, skill packs, PDF tools, and a local dashboard.
 
 ---
 
-## Core Principles
+## Core principles
 
-1. **Frozen base model + mutable harness**
-2. **Interventional discipline** — only external observations update posteriors
-3. **Anytime-valid certificates** — GRO e-process + harmonic spending
-4. **Soft canary → hard commit** — empirical second lock
-5. **Auditability** — certificates and replay
-
----
-
-## Architecture
-
-```
-L3  Gates (GRO + conformal + canary)
-L2  Harness (skills, policy, memory refs)
-L1  Swarm agents + skill packs
-L0  BaseLLM (echo / OpenAI / Anthropic / local)
-```
-
-**Bayesian inference stack** (`bayesian_core/inference_layers.py`):
-
-| Layer | Name | Role |
-|-------|------|------|
-| 0 | Conjugate BeliefStore | Fast Beta counts |
-| 1 | Hierarchical NumPyro | Population + per-entity posteriors |
-| 2 | Conformal | Distribution-free intervals |
-| 3 | GRO e-process | Anytime-valid commit gate |
-| 4 | Canary | Live empirical promotion check |
-
-Docs: `architecture/bayesian_canary_safety.md`, `architecture/production_llm_wiring.md`, `architecture/drive_inventory.md`.
+1. Frozen base model + mutable harness  
+2. Only **external** observations update posteriors  
+3. GRO e-process + conformal + **strict canary** before hard commit  
+4. Full audit trail  
 
 ---
 
-## Swarm multi-agent layer (`swarm/`)
+## Bayesian + canary safety (stricter defaults)
 
-Roles (Drive-aligned, safety-constrained):
+`config/default.yaml`:
 
-- **MemoryVault** — tagged durable memory
-- **PatternRecognition** — entity/timeline patterns with evidence
-- **SourceAnalyst** — source grading + citations + contradictions
-- **DocumentForensics** — PDF/text digests
-- **QueryPlanner** — public query string builder only
-- **ComplianceGate** — interventional discipline
-- **Synthesizer** — final structured merge
+- `alpha_total: 0.03`
+- `conformal_alpha: 0.05`, `max_conformal_width: 0.18`
+- `canary_success_threshold: 0.72`, `canary_min_sessions: 8`, `canary_extra_sessions: 20`
+
+Inference stack L0–L4: `bayesian_core/inference_layers.py`  
+Methods: `architecture/conformal_methods.md`, `architecture/bayesian_canary_safety.md`
+
+Conformal API: split, jackknife+ approx, weighted residuals, `gate_metrics()`.
+
+---
+
+## Swarm → Orchestrator auto skill patches
 
 ```python
-from llm.factory import create_llm
-from swarm import SwarmRunner, get_roster
+from swarm import SwarmRunner, swarm_to_candidate_patch
+from core import Orchestrator, BeliefStore, Harness
 
-llm = create_llm()  # CODESORCERER_LLM_PROVIDER=openai|anthropic|local|echo
-swarm = SwarmRunner(llm=llm, roster=get_roster())
-result = swarm.run_sequential(task, context=doc_text)
-# or result = swarm.run_parallel(task, context=doc_text)
-print(result.synthesis)
+swarm = SwarmRunner(llm=create_llm())
+result = swarm.run_sequential(task, context=pdf_text)
+# Orchestrator.evaluate_swarm_patch(result, instances, evaluate_fn, session_fn_for_canary=...)
 ```
 
-Demo: `python -m examples.swarm_demo`
+`swarm/auto_patch.py` builds `candidate_patch` from agent outputs; Orchestrator runs e-process → canary → hard-commit merge.
 
 ---
 
-## Production LLM wiring
+## PDF tools
 
-| Piece | Path |
-|-------|------|
-| Abstraction | `llm/base.py` (`BaseLLM`) |
-| Adapters | `llm/adapters.py` |
-| Factory | `llm/factory.py` → `create_llm()` |
-| Guide | `architecture/production_llm_wiring.md` |
+```python
+from tools.pdf_tools import extract_pdf_text, extract_many
+r = extract_pdf_text("doc.pdf")
+ctx = extract_many(["a.pdf", "b.pdf"])  # swarm context
+```
 
-Env: `CODESORCERER_LLM_PROVIDER`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LOCAL_LLM_BASE_URL`, etc.
-
----
-
-## Evaluators
-
-- `KeywordMatchEvaluator`, `ThresholdSuccessEvaluator` — `core/evaluator.py`
-- `LengthPenaltyEvaluator`, `ExternalTagEvaluator`, `CompositeEvaluator` — `core/evaluators_extra.py`
+Requires `pypdf` (in requirements.txt).
 
 ---
 
-## Skill packs
+## Dashboard UI
 
-See `skills_data/PACKS.md`. Domains: research, evidence, agent, documents, recovery (educational only).
+```bash
+python -m examples.full_cycle   # populate state/
+python -m dashboard.app         # http://127.0.0.1:8765/
+```
+
+Stdlib HTTP server: HTML status + `/api/belief`, `/api/harness`, `/api/audit`.  
+Details: `architecture/dashboard_ui.md`
 
 ---
 
-## Quick Start
+## Production LLM
+
+`llm.factory.create_llm()` — env `CODESORCERER_LLM_PROVIDER=echo|openai|anthropic|local`  
+Guide: `architecture/production_llm_wiring.md`
+
+---
+
+## Quick start
 
 ```bash
 pip install -r requirements.txt
 python tests/test_core.py
-python -m examples.basic_loop
-python -m examples.full_cycle
-python -m examples.orchestrated_canary
 python -m examples.swarm_demo
+python -m examples.orchestrated_canary
+python -m dashboard.app
 ```
 
-CI: `.github/workflows/ci.yml`
-
----
-
-## Status
-
-| Area | State |
-|------|--------|
-| Bayesian layers 0–4 + canary safety | in place |
-| Swarm multi-agent layer | in place |
-| Production LLM factory + adapters | in place |
-| Extra evaluators | in place |
-| Skill packs + Drive alignment | in place |
-| Orchestrator / canary / hard-commit | in place |
-| CI | in place |
+Repo: https://github.com/cantgetalonggta-png/CodeSorcerer
