@@ -1,0 +1,18 @@
+# CodeSorcerer default configuration
+
+alpha_total: 0.05
+min_eval_instances: 8
+conformal_alpha: 0.10
+max_conformal_width: 0.25
+
+state_dir: state
+belief_store_path: state/belief_store.json
+harness_path: state/harness.json
+audit_log_path: state/audit_log.json
+
+# Canary settings
+canary_extra_instances: 15
+canary_dir: state/canaries
+
+# Logging
+log_level: INFO
