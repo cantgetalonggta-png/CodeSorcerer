@@ -10,10 +10,14 @@ from core.orchestrator import Orchestrator
 from audit.schema import AuditLog
 
 
-def evaluate_fn(config: str, instance: int) -> float:
-    """Dummy evaluator – replace with real task metric."""
-    base = 0.62 if config == "candidate" else 0.55
-    return base + np.random.randn() * 0.04
+def evaluate_fn(config, instance: int) -> float:
+    """Dummy evaluator – higher score for richer candidate patches."""
+    if isinstance(config, dict):
+        n = len(config.get("skills", {})) + len(config.get("policy_fragments", {}))
+        base = 0.55 + 0.05 * min(n, 4)
+    else:
+        base = 0.50
+    return base + abs(np.random.randn() * 0.02)
 
 
 def main():
@@ -30,18 +34,29 @@ def main():
         audit_log=audit,
         alpha_total=0.05,
         state_dir="state",
+        canary_extra_sessions=5,
+        canary_success_threshold=0.5,
+        canary_min_sessions=3,
     )
 
-    # Simulate some external evidence first
     orch.interventional_update_skill("skill_demo", success=True, is_agent_action=False)
     orch.interventional_update_skill("skill_demo", success=True, is_agent_action=False)
     orch.interventional_update_skill("skill_demo", success=False, is_agent_action=False)
 
-    instances = list(range(25))
+    candidate_patch = {
+        "skills": {
+            "skill_demo": {"description": "demo skill improved", "version": 2},
+            "extra": {"description": "evidence aware helper"},
+        },
+        "policy_fragments": {"evidence_policy": "Only external observations update beliefs."},
+    }
+    incumbent = {"skills": harness.skills, "policy_fragments": harness.policy_fragments}
+
+    instances = list(range(30))
     decision = orch.evaluate_candidate(
         candidate_id="cand_v1",
-        candidate_config="candidate",
-        incumbent_config="incumbent",
+        candidate_patch=candidate_patch,
+        incumbent_config=incumbent,
         instances=instances,
         evaluate_fn=evaluate_fn,
     )
