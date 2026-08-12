@@ -1,0 +1,7 @@
+numpy>=1.24
+jax>=0.4.20
+jaxlib>=0.4.20
+numpyro>=0.13.0
+optax>=0.1.7
+torch>=2.1.0
+typing-extensions>=4.8.0
