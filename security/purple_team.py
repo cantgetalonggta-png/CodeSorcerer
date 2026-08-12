@@ -1,14 +1,13 @@
 """
-Purple-team style defensive checks for CodeSorcerer.
+Purple-team defensive checks for CodeSorcerer.
 
-These are internal control tests — not offensive capability.
-They verify that interventional discipline, commit gates, and
-session tagging behave as designed.
+Internal control tests only — verify interventional discipline,
+commit certificates, session tagging, and evidence filtering.
 """
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Callable
+from typing import List, Optional
 
 
 @dataclass
@@ -28,28 +27,37 @@ class PurpleReport:
 
     def summary(self) -> str:
         lines = [f"[{'PASS' if r.passed else 'FAIL'}] {r.name}: {r.detail}" for r in self.results]
-        lines.append(f"Overall: {'PASS' if self.ok else 'FAIL'} ({sum(r.passed for r in self.results)}/{len(self.results)})")
+        lines.append(
+            f"Overall: {'PASS' if self.ok else 'FAIL'} "
+            f"({sum(r.passed for r in self.results)}/{len(self.results)})"
+        )
         return "\n".join(lines)
 
 
-def check_agent_actions_do_not_update_belief(belief_factory: Callable) -> CheckResult:
-    """Agent interventions must not change skill counts."""
+def check_orchestrator_skips_agent_updates() -> CheckResult:
+    """Orchestrator.interventional_update_skill must no-op when is_agent_action=True."""
     from core.belief_store import BeliefStore
-    b = belief_factory() if belief_factory else BeliefStore()
-    before_a = dict(b.skill_alpha)
-    before_b = dict(b.skill_beta)
-    # simulate orchestrator path: is_agent_action=True should no-op
-    # BeliefStore itself always updates; the gate is at Orchestrator level.
-    # Here we document expected policy: callers must not call update_skill for agent actions.
+    from core.harness import Harness
+    from core.orchestrator import Orchestrator
+
+    b = BeliefStore()
+    h = Harness()
+    orch = Orchestrator(belief_store=b, harness=h, state_dir="state/purple_orch")
+    orch.interventional_update_skill("s_purple", success=True, is_agent_action=True)
+    agent_blocked = "s_purple" not in b.skill_alpha and "s_purple" not in b.skill_beta
+    orch.interventional_update_skill("s_purple", success=True, is_agent_action=False)
+    external_ok = b.skill_alpha.get("s_purple", 0) >= 2.0
+    ok = agent_blocked and external_ok
     return CheckResult(
-        name="agent_action_policy",
-        passed=True,
-        detail="Policy: callers must skip BeliefStore.update_skill when is_agent_action=True (enforced in Orchestrator).",
+        name="orchestrator_skips_agent_updates",
+        passed=ok,
+        detail=f"agent_blocked={agent_blocked} external_alpha={b.skill_alpha.get('s_purple')}",
     )
 
 
 def check_session_tag_kinds() -> CheckResult:
     from core.session_memory import SessionMemory
+
     sm = SessionMemory(root="state/purple_sessions")
     s = sm.start()
     s.tag_agent("assistant", "I propose X")
@@ -57,11 +65,7 @@ def check_session_tag_kinds() -> CheckResult:
     kinds = {e.kind for e in s.events}
     ok = kinds == {"agent_intervention", "external_observation"}
     sm.end()
-    return CheckResult(
-        name="session_tag_kinds",
-        passed=ok,
-        detail=f"kinds={kinds}",
-    )
+    return CheckResult(name="session_tag_kinds", passed=ok, detail=f"kinds={kinds}")
 
 
 def check_hard_commit_requires_certificate() -> CheckResult:
@@ -69,6 +73,7 @@ def check_hard_commit_requires_certificate() -> CheckResult:
     from core.belief_store import BeliefStore
     from core.commit import apply_candidate_patch
     from audit.schema import CertificateRecord
+
     h = Harness()
     b = BeliefStore()
     cert = CertificateRecord.create(
@@ -83,7 +88,7 @@ def check_hard_commit_requires_certificate() -> CheckResult:
     return CheckResult(
         name="hard_commit_certificate",
         passed=ok,
-        detail=f"harness_v={h.version} belief_v={b.version}",
+        detail=f"harness_v={h.version} belief_v={b.version} cert_set={bool(h.last_certificate_id)}",
     )
 
 
@@ -91,9 +96,9 @@ def check_evidence_filters_agent() -> CheckResult:
     from core.session_memory import Session
     from core.evidence import extract_evidence_from_session, apply_evidence_to_belief
     from core.belief_store import BeliefStore
+
     s = Session.create()
-    s.tag_agent("assistant", "success claimed", skill_id="s1")
-    # agent path should not count even if success inferred
+    s.tag_agent("assistant", "success claimed")
     s.events[-1].metadata["skill_id"] = "s1"
     s.events[-1].metadata["success"] = True
     s.tag_external("tool", "verified success", tool_name="t")
@@ -102,7 +107,6 @@ def check_evidence_filters_agent() -> CheckResult:
     recs = extract_evidence_from_session(s, default_skill_id="s1")
     b = BeliefStore()
     n = apply_evidence_to_belief(b, recs)
-    # only external should apply
     ok = n == 1 and b.skill_alpha.get("s1", 1.0) >= 2.0
     return CheckResult(
         name="evidence_filters_agent",
@@ -111,14 +115,28 @@ def check_evidence_filters_agent() -> CheckResult:
     )
 
 
+def check_conformal_gate_metrics() -> CheckResult:
+    import numpy as np
+    from bayesian_core.conformal import gate_metrics
+
+    m = gate_metrics(np.array([0.05, 0.1, 0.12, 0.2]), test_score=0.1, alpha=0.05, method="split")
+    ok = "width" in m and "p_value" in m and m["width"] >= 0
+    return CheckResult(name="conformal_gate_metrics", passed=ok, detail=str({k: m[k] for k in ("width", "p_value", "method")}))
+
+
 def run_purple_suite() -> PurpleReport:
     report = PurpleReport()
-    report.results.append(check_agent_actions_do_not_update_belief(None))
+    report.results.append(check_orchestrator_skips_agent_updates())
     report.results.append(check_session_tag_kinds())
     report.results.append(check_hard_commit_requires_certificate())
     report.results.append(check_evidence_filters_agent())
+    report.results.append(check_conformal_gate_metrics())
     return report
 
 
-if __name__ == "__main__":
+def main() -> None:
     print(run_purple_suite().summary())
+
+
+if __name__ == "__main__":
+    main()
