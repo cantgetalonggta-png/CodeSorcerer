@@ -1,4 +1,5 @@
 from .base import BaseLLM, EchoLLM, ToolSpec, Message, LLMResponse, ToolRouter
+from .adapters import OpenAIAdapter, AnthropicAdapter, LocalOpenAICompatibleAdapter
 
 __all__ = [
     "BaseLLM",
@@ -7,4 +8,7 @@ __all__ = [
     "Message",
     "LLMResponse",
     "ToolRouter",
+    "OpenAIAdapter",
+    "AnthropicAdapter",
+    "LocalOpenAICompatibleAdapter",
 ]
