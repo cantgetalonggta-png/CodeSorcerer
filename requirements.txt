@@ -5,3 +5,7 @@ numpyro>=0.13.0
 optax>=0.1.7
 torch>=2.1.0
 typing-extensions>=4.8.0
+pypdf>=4.0.0
+# optional LLM backends:
+# openai>=1.0.0
+# anthropic>=0.20.0
