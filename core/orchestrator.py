@@ -3,20 +3,21 @@ Orchestrator – top-level improvement cycle controller.
 
 Coordinates:
   session → verification → interventional update →
-  candidate generation → e-process + conformal gate →
-  soft/hard commit (real canary + real patch merge) → audit
+  candidate generation (including swarm auto skill patches) →
+  e-process + conformal gate → soft/hard commit → audit
 """
 
 from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 from pathlib import Path
+import numpy as np
 
 from core.belief_store import BeliefStore
 from core.harness import Harness
 from core.canary import CanaryRunner, CanaryResult
 from core.commit import apply_candidate_patch
 from bayesian_core.eprocess import GROMixtureState, HarmonicSpender, update_gro_mixture
-from bayesian_core.conformal import split_conformal_interval, conformal_p_value
+from bayesian_core.conformal import gate_metrics
 from commit_gate.soft_hard import soft_commit_decision
 from audit.schema import AuditLog, CertificateRecord
 
@@ -27,9 +28,14 @@ class Orchestrator:
         belief_store: BeliefStore,
         harness: Harness,
         audit_log: Optional[AuditLog] = None,
-        alpha_total: float = 0.05,
+        alpha_total: float = 0.03,
         state_dir: str | Path = "state",
-        canary_extra_sessions: int = 10,
+        canary_extra_sessions: int = 20,
+        canary_success_threshold: float = 0.72,
+        canary_min_sessions: int = 8,
+        conformal_alpha: float = 0.05,
+        max_conformal_width: float = 0.18,
+        conformal_method: str = "split",
     ):
         self.belief = belief_store
         self.harness = harness
@@ -39,7 +45,11 @@ class Orchestrator:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.canary_runner = CanaryRunner(canary_dir=self.state_dir / "canaries")
         self.canary_extra_sessions = canary_extra_sessions
-        # Pending soft-canary state: candidate_id → (patch, certificate)
+        self.canary_success_threshold = canary_success_threshold
+        self.canary_min_sessions = canary_min_sessions
+        self.conformal_alpha = conformal_alpha
+        self.max_conformal_width = max_conformal_width
+        self.conformal_method = conformal_method
         self._pending_canaries: Dict[str, Dict[str, Any]] = {}
 
     def interventional_update_skill(self, skill_id: str, success: bool, is_agent_action: bool = False):
@@ -57,30 +67,29 @@ class Orchestrator:
         cal_scores: Optional[List[float]] = None,
         session_fn_for_canary: Optional[Callable] = None,
     ) -> str:
-        """
-        Run paired evaluation under GRO mixture + conformal gate.
-        On hard_commit → apply_candidate_patch.
-        On soft_canary → deploy real canary and optionally run extra sessions.
-        """
         e_state = GROMixtureState()
-        cal_scores = cal_scores or [0.1, 0.12, 0.15, 0.18, 0.20]
+        cal = np.asarray(cal_scores or [0.08, 0.10, 0.12, 0.14, 0.16, 0.18], dtype=float)
 
         for inst in instances:
-            # candidate_patch is treated as the "config" for scoring
             score_c = evaluate_fn(candidate_patch, inst)
             score_i = evaluate_fn(incumbent_config, inst)
             outcome = 1.0 if score_c > score_i + 1e-6 else 0.0
             e_state = update_gro_mixture(e_state, outcome)
 
-            q_hat = split_conformal_interval(cal_scores, alpha=0.10)
-            conf_p = conformal_p_value(0.12, cal_scores)
-            width = q_hat * 2.0
-
+            metrics = gate_metrics(
+                cal_scores=cal,
+                test_score=0.12,
+                theta_mean=0.55,
+                alpha=self.conformal_alpha,
+                method=self.conformal_method,
+            )
             decision = soft_commit_decision(
                 e_state=e_state,
                 spender=self.spender,
-                conformal_p=conf_p,
-                conformal_width=width,
+                conformal_p=metrics["p_value"],
+                conformal_width=metrics["width"],
+                conf_alpha=self.conformal_alpha,
+                max_width=self.max_conformal_width,
             )
 
             if decision != "continue":
@@ -90,22 +99,47 @@ class Orchestrator:
                     e_wealth=e_state.wealth,
                     e_n=e_state.n,
                     alpha_spent=self.spender.spent,
-                    conformal_p=conf_p,
-                    conformal_width=width,
+                    conformal_p=metrics["p_value"],
+                    conformal_width=metrics["width"],
                 )
                 self.audit.append(rec)
-
                 if decision == "hard_commit":
                     self._hard_commit(candidate_patch, rec)
                 elif decision == "soft_canary":
                     self._soft_canary(candidate_id, candidate_patch, rec, session_fn_for_canary)
-
                 return decision
-
         return "continue"
 
+    def evaluate_swarm_patch(
+        self,
+        swarm_result,
+        instances: List[Any],
+        evaluate_fn: Callable[[Any, Any], float],
+        session_fn_for_canary: Optional[Callable] = None,
+        min_agents: int = 3,
+        candidate_id: Optional[str] = None,
+    ) -> str:
+        """Build auto skill patch from swarm and run evaluate_candidate."""
+        from swarm.auto_patch import swarm_to_candidate_patch, should_propose_patch
+
+        if not should_propose_patch(swarm_result, min_agents=min_agents):
+            return "reject_insufficient_swarm"
+        patch = swarm_to_candidate_patch(swarm_result)
+        cid = candidate_id or f"swarm_{len(swarm_result.results)}a"
+        incumbent = {
+            "skills": self.harness.skills,
+            "policy_fragments": self.harness.policy_fragments,
+        }
+        return self.evaluate_candidate(
+            candidate_id=cid,
+            candidate_patch=patch,
+            incumbent_config=incumbent,
+            instances=instances,
+            evaluate_fn=evaluate_fn,
+            session_fn_for_canary=session_fn_for_canary,
+        )
+
     def _hard_commit(self, candidate_patch: Dict[str, Any], certificate: CertificateRecord):
-        """Actually merge the candidate into the live harness + belief store."""
         apply_candidate_patch(
             harness=self.harness,
             belief=self.belief,
@@ -121,7 +155,6 @@ class Orchestrator:
         certificate: CertificateRecord,
         session_fn: Optional[Callable] = None,
     ):
-        """Deploy a real canary harness and optionally run extra sessions."""
         canary_harness = self.canary_runner.deploy_canary(
             candidate_id=candidate_id,
             base_harness=self.harness,
@@ -133,20 +166,20 @@ class Orchestrator:
             "certificate": certificate,
             "canary_harness": canary_harness,
         }
-
         if session_fn is not None:
             result: CanaryResult = self.canary_runner.run_sessions(
                 canary=canary_harness,
                 n_sessions=self.canary_extra_sessions,
                 session_fn=session_fn,
             )
-            # Simple promotion rule: if canary success rate looks good, hard-commit
-            if result.success_rate >= 0.6 and result.n_sessions >= 5:
+            if (
+                result.success_rate >= self.canary_success_threshold
+                and result.n_sessions >= self.canary_min_sessions
+            ):
                 self._hard_commit(candidate_patch, certificate)
                 self._pending_canaries.pop(candidate_id, None)
 
     def promote_canary(self, candidate_id: str) -> bool:
-        """Manually promote a pending canary to hard commit."""
         pending = self._pending_canaries.get(candidate_id)
         if not pending:
             return False
